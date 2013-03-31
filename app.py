@@ -30,18 +30,17 @@ def async(f):
 
 
 def route(url, *args, **kwargs):
-    super_route = app.route
     def deco(f):
         @app.route(url, *args, **kwargs)
         @wraps(f)
-        def decorated_function(*args, **kwargs):
+        def decorated(*args, **kwargs):
             response = f(*args, **kwargs)
             if isinstance(response, dict):
                 response["success"] = True
                 response = jsonify(response)
                 response.headers['X-Hello'] = "Hello world!"
             return response
-        return decorated_function
+        return decorated
 
     return deco
 
@@ -92,7 +91,8 @@ def invalid_request_response():
     if request.method == "GET":
         return '<form method="POST">Enter "42": <input name="x" type="text" /><input type="submit" /></form>'
     elif request.method == "POST":
-        if request.args.get("x", None) == "42":
+        print request.form
+        if request.form.get("x", None) == "42":
             return "Yeah!"
         else:
             raise InvalidRequest("INVALID_ANSWER")
