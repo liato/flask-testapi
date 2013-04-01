@@ -2,6 +2,7 @@ import string
 import random
 import pprint
 import time
+import os
 from threading import Thread
 from functools import wraps
 
@@ -13,12 +14,13 @@ from flask import abort
 from flask import request
 from flask import g
 
+from httpcodes import http_codes
+
 app = Flask(__name__)
 app.config.from_object(__name__)
 
 class InvalidRequest(HTTPException):
     code = 400
-    message = "INVALID_REQUEST"
     def __init__(self, message):
         self.message = message
 
@@ -51,17 +53,18 @@ def auth(f):
     return decorated
 
 
-@app.errorhandler(400)
-@app.errorhandler(401)
+#@app.errorhandler(400)
+#@app.errorhandler(401)
 def handle_error(error):
     response = {"success": False}
     if isinstance(error, InvalidRequest):
         response["code"] = error.message
-    elif error.code == 401:
-        response["code"] = "UNAUTHORIZED"
     else:
-        response["code"] = "INVALID_REQUEST"
+        response["code"] = http_codes.get(error.code, str(error.code))
     return jsonify(response), error.code
+for error in range(400, 420) + range(500,506):
+    app.error_handler_spec[None][error] = handle_error
+
 
 @app.before_request
 def before_request():
@@ -79,6 +82,10 @@ def json_response():
 @route('/str')
 def string_response():
     return "yo"
+
+@route('/notimpl')
+def not_implemented_response():
+    abort(501)
 
 @route('/auth')
 @auth
@@ -100,4 +107,5 @@ def invalid_request_response():
 
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", debug=True, port=5002)
+    port = int(os.environ.get('PORT', 5002))
+    app.run(host='0.0.0.0', port=port, debug=True)
