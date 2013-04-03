@@ -1,28 +1,59 @@
-import string
-import random
-import pprint
-import time
 import os
-from threading import Thread
+import time
 from functools import wraps
+from threading import Thread
 
-from werkzeug.exceptions import HTTPException
 from flask import Flask
-from flask import render_template
-from flask import jsonify
 from flask import abort
-from flask import request
 from flask import g
+from flask import jsonify
+from flask import request
+from werkzeug.exceptions import HTTPException
 
 from httpcodes import http_codes
 
-app = Flask(__name__)
+
+class Flashk(Flask):
+    def make_response(self, rv):
+        if isinstance(rv, dict):
+            rv["success"] = True
+            rv = jsonify(rv)
+            rv.headers['X-Hello'] = "Hello world!"
+        return Flask.make_response(self, rv)
+
+    def handle_http_exception(self, e):
+        handlers = self.error_handler_spec.get(request.blueprint)
+        # Proxy exceptions don't have error codes.  We want to always return
+        # those unchanged as errors
+        if e.code is None:
+            return e
+        if handlers and e.code in handlers:
+            handler = handlers[e.code]
+        else:
+            handler = self.error_handler_spec[None].get(e.code)
+        if handler is None:
+            response = {"success": False}
+            if isinstance(e, BadRequest):
+                response["error"] = e.error
+                if e.message:
+                    response["message"] = e.message
+            else:
+                response["error"] = http_codes.get(e.code, str(e.code))
+            return jsonify(response), e.code
+        return handler(e)
+
+
+app = Flashk(__name__)
 app.config.from_object(__name__)
 
-class InvalidRequest(HTTPException):
+
+class BadRequest(HTTPException):
     code = 400
-    def __init__(self, message):
+
+    def __init__(self, error, message=None):
+        self.error = error
         self.message = message
+
 
 def async(f):
     def wrapper(*args, **kwargs):
@@ -31,21 +62,6 @@ def async(f):
     return wrapper
 
 
-def route(url, *args, **kwargs):
-    def deco(f):
-        @app.route(url, *args, **kwargs)
-        @wraps(f)
-        def decorated(*args, **kwargs):
-            response = f(*args, **kwargs)
-            if isinstance(response, dict):
-                response["success"] = True
-                response = jsonify(response)
-                response.headers['X-Hello'] = "Hello world!"
-            return response
-        return decorated
-
-    return deco
-
 def auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -53,47 +69,39 @@ def auth(f):
     return decorated
 
 
-#@app.errorhandler(400)
-#@app.errorhandler(401)
-def handle_error(error):
-    response = {"success": False}
-    if isinstance(error, InvalidRequest):
-        response["code"] = error.message
-    else:
-        response["code"] = http_codes.get(error.code, str(error.code))
-    return jsonify(response), error.code
-for error in range(400, 420) + range(500,506):
-    app.error_handler_spec[None][error] = handle_error
-
-
 @app.before_request
 def before_request():
     g.responsestart = time.time()
+
 
 @app.after_request
 def after_request(response):
     response.headers['X-ExecutionTime'] = "%fms" % ((time.time()-g.responsestart)*1000)
     return response
 
-@route('/')
+
+@app.route('/')
 def json_response():
     return {"hej": "blah"}
 
-@route('/str')
+
+@app.route('/str')
 def string_response():
     return "yo"
 
-@route('/notimpl')
+
+@app.route('/notimpl')
 def not_implemented_response():
     abort(501)
 
-@route('/auth')
+
+@app.route('/auth')
 @auth
 def auth_required_response():
     return "logged in"
 
 
-@route('/validate', methods=["GET", "POST"])
+@app.route('/validate', methods=["GET", "POST"])
 def invalid_request_response():
     if request.method == "GET":
         return '<form method="POST">Enter "42": <input name="x" type="text" /><input type="submit" /></form>'
@@ -102,8 +110,7 @@ def invalid_request_response():
         if request.form.get("x", None) == "42":
             return "Yeah!"
         else:
-            raise InvalidRequest("INVALID_ANSWER")
-
+            raise BadRequest("INVALID_ANSWER", "you suck")
 
 
 if __name__ == '__main__':
